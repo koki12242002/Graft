@@ -1,0 +1,40 @@
+name: October 2026 dependency security audit
+on:
+  push:
+    branches:
+      - security/oct2026-audit
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  npm-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+      - name: Check locked npm dependencies without install scripts
+        shell: bash
+        run: |
+          npm audit fix --package-lock-only --ignore-scripts --no-fund || true
+          npm audit --package-lock-only --json > /tmp/audit.json || true
+          node - <<'JS'
+          const fs=require('fs');
+          const data=JSON.parse(fs.readFileSync('/tmp/audit.json','utf8'));
+          if(data.error){console.error(JSON.stringify(data.error));process.exit(2)}
+          console.log('AUDIT_COUNTS '+JSON.stringify(data.metadata?.vulnerabilities));
+          for (const [name,v] of Object.entries(data.vulnerabilities||{}))
+            console.log('AUDIT_PACKAGE '+JSON.stringify({name,level:v.severity,via:(v.via||[]).filter(x=>typeof x==='object').map(x=>x.url)}));
+          if(data.metadata?.vulnerabilities?.total>0)process.exit(1);
+          JS
+      - name: Commit patched lockfile
+        run: |
+          if ! git diff --quiet -- package-lock.json; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add package-lock.json
+            git commit -m 'security: update js-yaml dependency lockfile'
+            git push
+          fi
